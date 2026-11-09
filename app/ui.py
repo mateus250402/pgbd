@@ -26,6 +26,22 @@ def aquecer(abordagem: str) -> bool:
     return True
 
 
+def renderizar_grid_imagens(lista_imagens: list[dict], num_colunas: int = 5):
+    """Renderiza uma lista de imagens dispostas em colunas no Streamlit."""
+    colunas = st.columns(num_colunas)
+    for index, item in enumerate(lista_imagens):
+        col_idx = index % num_colunas
+        with colunas[col_idx]:
+            caminho_img = Path(item["caminho"])
+            if caminho_img.is_file():
+                caption = f"{item['nome']}"
+                if "score" in item:
+                    caption += f" · score: {item['score']:.4f}"
+                st.image(str(caminho_img), caption=caption, use_container_width=True)
+            else:
+                st.warning(f"Não encontrada: {item['caminho']}")
+
+
 inicializar()
 st.title("Busca de imagens por texto")
 
@@ -52,44 +68,51 @@ if total > 0 and not preparado:
             barra.empty()
             st.error(f"Falha ao preparar o modelo: {e}")
         else:
-            st.success(f"Pronto: {r['total']} embeddings em {r['tempo_geracao_s']:.1f} s"
-                       + (f" ({r['puladas']} imagens ilegíveis puladas)" if r["puladas"] else ""))
+            st.success(
+                f"Pronto: {r['total']} embeddings em {r['tempo_geracao_s']:.1f} s"
+                + (f" ({r['puladas']} imagens ilegíveis puladas)" if r["puladas"] else "")
+            )
             st.rerun()
 
 if preparado:
     aquecer(abordagem)
 
+# Campo de input e botões
 texto = st.text_input("Descreva a imagem", disabled=not preparado)
-clicou = st.button("Buscar", key="buscar", disabled=not preparado)
+col_btn1, col_btn2 = st.columns([1, 5])
+clicou_buscar = col_btn1.button("Buscar", key="buscar", disabled=not preparado)
 
-if clicou:
-    if not texto.strip():
-        st.warning("Digite um texto para buscar.")
+st.divider()
+
+# LÓGICA DE EXIBIÇÃO: SE BUSCOU, EXIBE MÉTRICAS + RESULTADOS FILTRADOS/ORDENADOS; SENÃO, LISTA TODAS AS IMAGENS DO BANCO.
+if clicou_buscar and texto.strip():
+    try:
+        # Busca no banco ordenando pelas N mais similares (ou todas usando o total de imagens)
+        k_resultados = total if total > 0 else K_FIXO
+        r = busca.buscar(texto, modo, k_resultados, metrica, abordagem)
+    except ValueError as e:
+        st.error(str(e))
     else:
-        try:
-            r = busca.buscar(texto, modo, K_FIXO, metrica, abordagem)
-        except ValueError as e:
-            st.error(str(e))
-        else:
-            cfg = repo.obter_config(abordagem)
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Tempo de busca", f"{r['tempo_ms']:.2f} ms", help="Mediana de 5 execuções")
-            m2.metric("1ª execução", f"{r['tempo_ms_1a']:.2f} ms")
-            m3.metric("Tempo de gerar embeddings", f"{cfg['tempo_geracao_s']:.1f} s", help="Base inteira, última geração")
-            m4.metric("Índice usado", r["indice"] or "nenhum (varredura)")
-            colunas = st.columns(K_FIXO)
-            for col, item in zip(colunas, r["resultados"]):
-                with col:
-                    if Path(item["caminho"]).is_file():
-                        st.image(item["caminho"], caption=f"{item['nome']} · score {item['score']:.4f}")
-                    else:
-                        st.warning(f"Arquivo não encontrado: {item['caminho']}")
-            with st.expander("EXPLAIN"):
-                st.code(r["plano"])
+        cfg = repo.obter_config(abordagem)
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Tempo de busca", f"{r['tempo_ms']:.2f} ms", help="Mediana de 5 execuções")
+        m2.metric("1ª execução", f"{r['tempo_ms_1a']:.2f} ms")
+        m3.metric("Tempo de gerar embeddings", f"{cfg['tempo_geracao_s']:.1f} s", help="Base inteira, última geração")
+        m4.metric("Índice usado", r["indice"] or "nenhum (varredura)")
+        
+        st.subheader(f"Resultados ordenados por similaridade com '{texto}'")
+        renderizar_grid_imagens(r["resultados"], num_colunas=5)
+        
+        with st.expander("EXPLAIN"):
+            st.code(r["plano"])
+else:
+    # Estado inicial (sem busca ativa): carrega e exibe todas as imagens do banco em um grid
+    st.subheader(f"Todas as imagens no catálogo ({total})")
+    todas_imagens = repo.listar_imagens()  # Retorna lista de dicts [{'id': ..., 'nome': ..., 'caminho': ...}]
+    if todas_imagens:
+        renderizar_grid_imagens(todas_imagens, num_colunas=5)
 
 st.divider()
 st.subheader("Relatório")
 if st.button("Testar todas as combinações e gerar relatório", key="relatorio"):
-    # Futuro: percorrer modelo × busca × métrica (ligar ao benchmark.py), acumular os
-    # resultados e gerar o relatório acumulado.
     st.info("Ainda não implementado: será feito futuramente.")

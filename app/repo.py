@@ -74,17 +74,28 @@ def modelo_preparado(abordagem: str) -> bool:
 
 def obter_config(abordagem: str) -> dict | None:
     with conexao() as conn:
-        cur = conn.execute(
-            """SELECT abordagem, tabela, dimensao, total, tempo_geracao_s, gerado_em
-               FROM config_embedding WHERE abordagem = %s""",
-            (abordagem,),
-        )
-        linha = cur.fetchone()
-        if linha is None:
-            return None
-        return dict(zip([d.name for d in cur.description], linha))
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT abordagem, tabela, dimensao, total, tempo_geracao_s, gerado_em
+                   FROM config_embedding WHERE abordagem = %s""",
+                (abordagem,),
+            )
+            linha = cur.fetchone()
+            if linha is None:
+                return None
+            colunas = [d.name for d in cur.description]
+            return dict(zip(colunas, linha))
 
 
 def total_imagens() -> int:
     with conexao() as conn:
         return conn.execute("SELECT count(*) FROM imagem").fetchone()[0]
+
+
+def listar_imagens() -> list[dict]:
+    """Retorna todas as imagens cadastradas para exibição inicial no grid."""
+    with conexao() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, nome, caminho FROM imagem ORDER BY id")
+            linhas = cur.fetchall()
+            return [{"id": row[0], "nome": row[1], "caminho": row[2]} for row in linhas]

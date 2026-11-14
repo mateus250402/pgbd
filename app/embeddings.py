@@ -23,8 +23,22 @@ def dimensao(abordagem: str) -> int:
     return ABORDAGENS_EMBEDDING[abordagem]["dimensao"]
 
 
-def _normalizar(t: torch.Tensor) -> list[list[float]]:
-    return torch.nn.functional.normalize(t, p=2, dim=-1).tolist()
+def _extrair_tensor(saida) -> torch.Tensor:
+    """Garante que a saída do modelo seja convertida em um torch.Tensor limpo."""
+    if isinstance(saida, torch.Tensor):
+        return saida
+    if hasattr(saida, "image_embeds") and saida.image_embeds is not None:
+        return saida.image_embeds
+    if hasattr(saida, "text_embeds") and saida.text_embeds is not None:
+        return saida.text_embeds
+    if hasattr(saida, "pooler_output") and saida.pooler_output is not None:
+        return saida.pooler_output
+    return saida[0]
+
+
+def _normalizar(saida) -> list[list[float]]:
+    tensor = _extrair_tensor(saida)
+    return torch.nn.functional.normalize(tensor, p=2, dim=-1).tolist()
 
 
 def _abrir(caminho: str) -> Image.Image | None:
@@ -45,7 +59,8 @@ def embed_imagens(caminhos: list[str], abordagem: str) -> list[list[float] | Non
     modelo, proc = carregar_modelo(abordagem)
     with torch.no_grad():
         entrada = proc(images=[im for _, im in validas], return_tensors="pt").to(DEVICE)
-        vetores = _normalizar(modelo.get_image_features(**entrada))
+        saida = modelo.get_image_features(**entrada)
+        vetores = _normalizar(saida)
     for (i, _), v in zip(validas, vetores):
         resultado[i] = v
     return resultado
@@ -63,7 +78,8 @@ def embed_texto(texto: str, abordagem: str) -> list[float]:
     kwargs = {"padding": "max_length", "max_length": 64} if "siglip" in ABORDAGENS_EMBEDDING[abordagem]["modelo"] else {"padding": True}
     with torch.no_grad():
         entrada = proc(text=[texto], return_tensors="pt", truncation=True, **kwargs).to(DEVICE)
-        return _normalizar(modelo.get_text_features(**entrada))[0]
+        saida = modelo.get_text_features(**entrada)
+        return _normalizar(saida)[0]
 
 
 def aquecer(abordagem: str) -> None:
